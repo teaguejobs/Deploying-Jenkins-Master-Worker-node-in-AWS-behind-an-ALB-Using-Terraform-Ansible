@@ -32,7 +32,7 @@ variable "instance-type" {
 #Add the variable webserver-port to variables.tf
 variable "webserver-port" {
   type    = number
-  default = 80
+  default = 8080
 }
 
 variable "site-name" {
@@ -41,7 +41,7 @@ variable "site-name" {
 }
 variable "dns-name" {
   type    = string
-  default = "055554749291.realhandsonlabs.net." # e.g "cmcloudlab1234.info."
+  default = "652662596920.realhandsonlabs.net." # e.g "cmcloudlab1234.info."
 }
 
 

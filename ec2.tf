@@ -10,30 +10,19 @@ data "aws_ssm_parameter" "linuxAmiOregon" {
   name     = "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
 }
 
-#Please note that this code expects SSH key pair to exist in default dir under 
-#users home directory, otherwise it will fail
-
 #Create key-pair for logging into EC2 in us-east-1
 resource "aws_key_pair" "master-key" {
   provider   = aws.region-master
-  key_name   = "jenkins"
+  key_name   = "jenkins-master"
   public_key = file("~/.ssh/id_rsa.pub")
 }
 
 #Create key-pair for logging into EC2 in us-west-2
 resource "aws_key_pair" "worker-key" {
   provider   = aws.region-worker
-  key_name   = "jenkins"
+  key_name   = "jenkins-worker"
   public_key = file("~/.ssh/id_rsa.pub")
 }
-
-
-
-
-
-
-
-
 
 #Create and bootstrap EC2 in us-east-1
 resource "aws_instance" "jenkins-master" {
@@ -44,20 +33,16 @@ resource "aws_instance" "jenkins-master" {
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.jenkins-sg.id]
   subnet_id                   = aws_subnet.subnet_1.id
-
+  provisioner "local-exec" {
+    command = <<EOF
+aws --profile ${var.profile} ec2 wait instance-status-ok --region ${var.region-master} --instance-ids ${self.id} \
+&& ansible-playbook --extra-vars 'passed_in_hosts=tag_Name_${self.tags.Name}' ansible_templates/install_jenkins.yaml
+EOF
+  }
   tags = {
     Name = "jenkins_master_tf"
   }
-
   depends_on = [aws_main_route_table_association.set-master-default-rt-assoc]
-
-  provisioner "local-exec" {
-    command = <<EOF
-aws --profile ${var.profile} ec2 wait instance-status-ok --region ${var.region-master} --instance-ids ${self.id}
-ansible-playbook --extra-vars 'passed_in_hosts=tag_Name_${self.tags.Name}' ansible_templates/jenkins-master-sample.yml
-EOF
-  }
-
 }
 
 #Create EC2 in us-west-2
@@ -70,16 +55,28 @@ resource "aws_instance" "jenkins-worker-oregon" {
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.jenkins-sg-oregon.id]
   subnet_id                   = aws_subnet.subnet_1_oregon.id
-
-  tags = {
-    Name = join("_", ["jenkins_worker_tf", count.index + 1])
+  provisioner "remote-exec" {
+    when = destroy
+    inline = [
+      "java -jar /home/ec2-user/jenkins-cli.jar -auth @/home/ec2-user/jenkins_auth -s http://${self.tags.Master_Private_IP}:8080 -auth @/home/ec2-user/jenkins_auth delete-node ${self.private_ip} || echo 0"
+    ]
+    connection {
+      type        = "ssh"
+      user        = "ec2-user"
+      private_key = file("~/.ssh/id_rsa")
+      host        = self.public_ip
+    }
   }
-  depends_on = [aws_main_route_table_association.set-worker-default-rt-assoc, aws_instance.jenkins-master]
+
   provisioner "local-exec" {
     command = <<EOF
-aws --profile ${var.profile} ec2 wait instance-status-ok --region ${var.region-worker} --instance-ids ${self.id}
-ansible-playbook --extra-vars 'passed_in_hosts=tag_Name_${self.tags.Name}' ansible_templates/jenkins-worker-sample.yml
+aws --profile ${var.profile} ec2 wait instance-status-ok --region ${var.region-worker} --instance-ids ${self.id} \
+&& ansible-playbook --extra-vars 'passed_in_hosts=tag_Name_${self.tags.Name} master_ip=${self.tags.Master_Private_IP}' ansible_templates/install_worker.yaml
 EOF
   }
-
+  tags = {
+    Name = join("_", ["jenkins_worker_tf", count.index + 1])
+    Master_Private_IP = aws_instance.jenkins-master.private_ip
+  }
+  depends_on = [aws_main_route_table_association.set-worker-default-rt-assoc]
 }
