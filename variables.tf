@@ -35,3 +35,13 @@ variable "webserver-port" {
   default = 80
 }
 
+variable "site-name" {
+  type    = string
+  default = "mysite"
+}
+variable "dns-name" {
+  type    = string
+  default = "055554749291.realhandsonlabs.net." # e.g "cmcloudlab1234.info."
+}
+
+
